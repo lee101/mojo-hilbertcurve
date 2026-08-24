@@ -11,10 +11,8 @@ constructor, `point_from_distance`, `points_from_distances`,
 `match_type` behavior. Valid dense batches with `p * n <= 63` use Mojo
 `int64` kernels. Wider grids retain the upstream arbitrary-precision result
 through an exact pure-Python fallback; they are correct but not accelerated.
-`n_procs` is accepted and exposed for source compatibility, but does not
-control the native worker pool. Large fixed-width batches run independent rows
-through a bounded Mojo worker pool; small batches remain serial to avoid launch
-overhead.
+`n_procs` is accepted and exposed for source compatibility. Fixed-width batches
+currently run serially in the native kernel.
 
 ## Install
 
@@ -44,15 +42,20 @@ assert curve.distances_from_points(points) == distances
 
 ## Performance
 
-Measured with `pixi run bench` on 2026-08-02, Linux 6.8, Intel Xeon E5-2697 v4
+Measured with `pixi run bench` on 2026-08-24, Linux 6.8, Intel Xeon E5-2697 v4
 at 2.30 GHz (72 logical CPUs), against `hilbertcurve` 2.0.5. Times are the
 best of three; the benchmark task uses a machine-wide `flock`.
 
 | case | mojo-hilbertcurve | hilbertcurve | ratio | result |
 | --- | ---: | ---: | ---: | --- |
-| points_from_distances (200k, p=10 n=3) | 77.1 ms | 1718.4 ms | 22.29x | faster |
-| distances_from_points (200k, p=10 n=3) | 26.6 ms | 3609.4 ms | 135.76x | faster |
-| points_from_distances (100k, p=15 n=4) | 46.7 ms | 1518.4 ms | 32.55x | faster |
+| points_from_distances (200k, p=10 n=3) | 99.8 ms | 1749.8 ms | 17.53x | faster |
+| distances_from_points (200k, p=10 n=3) | 51.3 ms | 3581.8 ms | 69.82x | faster |
+| points_from_distances (100k, p=15 n=4) | 72.9 ms | 1504.6 ms | 20.65x | faster |
+
+All benchmarked kernels are already more than 5x faster than upstream, so this
+profiling pass found no eligible parity-or-slower kernel to optimize. SIMD and
+thread-launch overhead were therefore not added to these branch-dependent bit
+transforms.
 
 ## How it works
 
@@ -72,7 +75,8 @@ entire call and avoids per-point FFI overhead.
 
 There is no GPU path. The transforms are branch-heavy integer bit permutations
 with repeated small-buffer accesses, so their effective arithmetic intensity is
-too low to repay host-device transfer and launch costs.
+well below the roughly 2-flop-per-byte threshold needed to justify host-device
+transfer and launch costs.
 
 ## Development
 
